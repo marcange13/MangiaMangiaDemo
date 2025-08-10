@@ -31,7 +31,6 @@ def clean_menu_df(df: pd.DataFrame) -> pd.DataFrame:
     if missing:
         raise ValueError(f"menu CSV missing columns: {missing}")
     df = df.copy()
-    # numeric cleanups
     numeric_cols = ["profit_margin_pct", "priority_score", "urgency_score", "surplus_score", "price", "cost"]
     for c in numeric_cols:
         df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
@@ -127,13 +126,13 @@ def tasty_mock(query: str, num: int = 3) -> List[Dict[str, Any]]:
 # ---------- OpenAI (assistant response) ----------
 def chat_complete(system_prompt: str, user_prompt: str, model: str = None) -> str:
     if not OPENAI_API_KEY:
-        return ("(Offline demo)\n"
-                "• Top picks balance margin + waste.\n"
-                "• Use near-expiry greens today.\n\n"
-                "Dishes:\n1) Spaghetti Aglio e Olio — pantry-first, fast.\n"
-                "2) Panzanella — uses surplus bread/tomatoes.\n"
-                "3) Frittata di Verdure — absorbs misc. veg.\n\n"
-                "Waste tips: rotate parsley & basil; pre-chop stems for soffritto.\n"
+        return ("(Offline demo)\\n"
+                "• Top picks balance margin + waste.\\n"
+                "• Use near-expiry greens today.\\n\\n"
+                "Dishes:\\n1) Spaghetti Aglio e Olio — pantry-first, fast.\\n"
+                "2) Panzanella — uses surplus bread/tomatoes.\\n"
+                "3) Frittata di Verdure — absorbs misc. veg.\\n\\n"
+                "Waste tips: rotate parsley & basil; pre-chop stems for soffritto.\\n"
                 "Pairing: light Chianti works broadly.")
     try:
         from openai import OpenAI
@@ -149,4 +148,4 @@ def chat_complete(system_prompt: str, user_prompt: str, model: str = None) -> st
         )
         return resp.choices[0].message.content.strip()
     except Exception as e:
-        return f"(LLM error fallback) {e}\nReturning concise template:\n- Use high-urgency items first.\n- Keep margin ≥ target.\n- Offer 3 dishes + 2 waste tips."
+        return f"(LLM error fallback) {e}\\nReturning concise template:\\n- Use high-urgency items first.\\n- Keep margin ≥ target.\\n- Offer 3 dishes + 2 waste tips."
