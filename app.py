@@ -1,4 +1,4 @@
-```python
+
 import io
 import pandas as pd
 import streamlit as st
@@ -279,3 +279,4 @@ if run_btn:
 else:
     st.info("Enter a query and click **Generate Suggestions**.")
 ```
+
