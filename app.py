@@ -21,7 +21,8 @@ st.set_page_config(
 )
 
 # ======================= Roman Trattoria Theme (no sidebar) =======================
-st.markdown(\"\"\"
+st.markdown(
+    """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Cormorant+Garamond:wght@400;500;600&display=swap');
 
@@ -83,7 +84,7 @@ p, div, span, label, input, textarea, button {
 .stButton>button, .m-btn {
   background: linear-gradient(180deg, #fff1e8, #ffe1d3);
   border: 1px solid #e0c1ad;
-  color: var(--terracotta);
+  color: #b45736;
   font-weight:700;
   border-radius:14px; padding:.55rem 1rem; cursor:pointer;
 }
@@ -119,12 +120,15 @@ small, .caption, .stCaption, [data-testid="stMarkdownContainer"] .caption {
   color: #5b564f !important; opacity:.9;
 }
 </style>
-\"\"\", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
 # =================================== Header ===================================
 c1, c2 = st.columns([0.72, 0.28])
 with c1:
-    st.markdown(\"\"\"
+    st.markdown(
+        """
 <div class="m-brand">
   <div class="m-laurel">❦</div>
   <div>
@@ -133,7 +137,9 @@ with c1:
   </div>
   <div class="m-laurel" style="margin-left:auto;">❦</div>
 </div>
-\"\"\", unsafe_allow_html=True)
+        """,
+        unsafe_allow_html=True,
+    )
 with c2:
     st.metric("Obiettivo di Oggi", "Spreco ↓  ·  Margine ↑", delta="Equilibrato")
 
@@ -142,7 +148,7 @@ st.markdown('<div class="toolbar">', unsafe_allow_html=True)
 query = st.text_input(
     "What should we cook today?",
     placeholder="e.g., ‘broccoli pasta’, ‘vegetarian lunch’, ‘seafood special’",
-    label_visibility="collapsed"
+    label_visibility="collapsed",
 )
 run_btn = st.button("Generate Suggestions", type="primary")
 st.markdown('</div>', unsafe_allow_html=True)
@@ -151,7 +157,7 @@ with st.expander("Options (Upload CSV, Scoring Weights, LLM)", expanded=False):
     uploaded_file = st.file_uploader(
         "Upload your menu CSV",
         type=["csv"],
-        help="Must include columns: " + ", ".join(REQUIRED_COLUMNS)
+        help="Must include columns: " + ", ".join(REQUIRED_COLUMNS),
     )
     data_path = st.text_input("…or use CSV path", "data/menu_with_viability.csv")
 
@@ -162,51 +168,67 @@ with st.expander("Options (Upload CSV, Scoring Weights, LLM)", expanded=False):
         label="Download template CSV",
         data=template_buf.getvalue(),
         file_name="menu_template.csv",
-        mime="text/csv"
+        mime="text/csv",
     )
 
     cA, cB, cC, cD, cE = st.columns(5)
     with cA:
         w_priority = st.slider("Weight: Priority", 0.0, 1.0, 0.55, 0.05)
     with cB:
-        w_margin   = st.slider("Weight: Margin",   0.0, 1.0, 0.25, 0.05)
+        w_margin = st.slider("Weight: Margin", 0.0, 1.0, 0.25, 0.05)
     with cC:
-        w_urgency  = st.slider("Weight: Urgency",  0.0, 1.0, 0.10, 0.05)
+        w_urgency = st.slider("Weight: Urgency", 0.0, 1.0, 0.10, 0.05)
     with cD:
-        w_surplus  = st.slider("Weight: Surplus",  0.0, 1.0, 0.10, 0.05)
+        w_surplus = st.slider("Weight: Surplus", 0.0, 1.0, 0.10, 0.05)
     with cE:
         top_k = st.slider("Top K dishes", 1, 10, 5)
 
     use_llm = st.checkbox("Use ChatGPT (if key set)", value=True)
 
-weights = {"priority": w_priority if 'w_priority' in locals() else 0.55,
-           "margin":   w_margin   if 'w_margin'   in locals() else 0.25,
-           "urgency":  w_urgency  if 'w_urgency'  in locals() else 0.10,
-           "surplus":  w_surplus  if 'w_surplus'  in locals() else 0.10}
-top_k = top_k if 'top_k' in locals() else 5
+weights = {
+    "priority": w_priority if "w_priority" in locals() else 0.55,
+    "margin": w_margin if "w_margin" in locals() else 0.25,
+    "urgency": w_urgency if "w_urgency" in locals() else 0.10,
+    "surplus": w_surplus if "w_surplus" in locals() else 0.10,
+}
+top_k = top_k if "top_k" in locals() else 5
 
 # ================================ Fallback Dataset ================================
 def _fallback_menu_df():
-    return pd.DataFrame([
-        {
-            "dish_name":"Spaghetti Aglio e Olio","price":14.0,"cost":3.2,
-            "profit_margin_pct":77.1,"priority_score":0.86,
-            "urgency_score":0.30,"surplus_score":0.20,
-            "ingredients":"spaghetti, garlic, olive oil, parsley, chili"
-        },
-        {
-            "dish_name":"Panzanella Toscana","price":12.0,"cost":2.5,
-            "profit_margin_pct":79.2,"priority_score":0.74,
-            "urgency_score":0.45,"surplus_score":0.40,
-            "ingredients":"stale bread, tomato, cucumber, onion, basil"
-        },
-        {
-            "dish_name":"Frittata di Verdure","price":13.0,"cost":2.9,
-            "profit_margin_pct":77.7,"priority_score":0.70,
-            "urgency_score":0.55,"surplus_score":0.35,
-            "ingredients":"eggs, onion, zucchini, spinach, pecorino"
-        }
-    ])
+    return pd.DataFrame(
+        [
+            {
+                "dish_name": "Spaghetti Aglio e Olio",
+                "price": 14.0,
+                "cost": 3.2,
+                "profit_margin_pct": 77.1,
+                "priority_score": 0.86,
+                "urgency_score": 0.30,
+                "surplus_score": 0.20,
+                "ingredients": "spaghetti, garlic, olive oil, parsley, chili",
+            },
+            {
+                "dish_name": "Panzanella Toscana",
+                "price": 12.0,
+                "cost": 2.5,
+                "profit_margin_pct": 79.2,
+                "priority_score": 0.74,
+                "urgency_score": 0.45,
+                "surplus_score": 0.40,
+                "ingredients": "stale bread, tomato, cucumber, onion, basil",
+            },
+            {
+                "dish_name": "Frittata di Verdure",
+                "price": 13.0,
+                "cost": 2.9,
+                "profit_margin_pct": 77.7,
+                "priority_score": 0.70,
+                "urgency_score": 0.55,
+                "surplus_score": 0.35,
+                "ingredients": "eggs, onion, zucchini, spinach, pecorino",
+            },
+        ]
+    )
 
 # ================================ Data Loading ================================
 @st.cache_data(show_spinner=False)
@@ -216,10 +238,12 @@ def _load_from_path(path: str) -> pd.DataFrame:
 df = None
 source_note = ""
 try:
-    if 'uploaded_file' in locals() and uploaded_file is not None:
+    if "uploaded_file" in locals() and uploaded_file is not None:
         raw = pd.read_csv(uploaded_file)
         missing, extra = validate_schema(raw.columns)
-        with st.expander("CSV schema check (uploaded)", expanded=(len(missing) > 0 or len(extra) > 0)):
+        with st.expander(
+            "CSV schema check (uploaded)", expanded=(len(missing) > 0 or len(extra) > 0)
+        ):
             if not missing and not extra:
                 st.success("Schema OK ✅ All required columns present.")
             if missing:
@@ -260,14 +284,14 @@ if run_btn:
             cc1, cc2, cc3, cc4 = st.columns([0.42, 0.16, 0.20, 0.22])
             with cc1:
                 st.markdown(f"### {r['dish_name']}")
-                st.caption(r.get("ingredients",""))
+                st.caption(r.get("ingredients", ""))
             with cc2:
                 st.metric("Margin %", f"{r['profit_margin_pct']:.0f}%")
             with cc3:
                 st.caption("Scores 🍝🍕")
                 st.write(
-                    f"Priority: **{r['priority_score']:.2f}**  \\n"
-                    f"Urgency: **{r['urgency_score']:.2f}**  \\n"
+                    f"Priority: **{r['priority_score']:.2f}**  \n"
+                    f"Urgency: **{r['urgency_score']:.2f}**  \n"
                     f"Surplus: **{r['surplus_score']:.2f}**"
                 )
             with cc4:
@@ -296,9 +320,9 @@ if run_btn:
 
     with tab3:
         st.subheader("Assistant Notes")
-        if 'use_llm' in locals() and use_llm:
+        if "use_llm" in locals() and use_llm:
             user_prompt = USER_PROMPT_TEMPLATE.format(query=query or "chef’s choice")
-            user_prompt += "\\n\\n" + CHEF_TONE_REMINDER
+            user_prompt += "\n\n" + CHEF_TONE_REMINDER
             response = chat_complete(SYSTEM_PROMPT, user_prompt)
             st.write(response)
         else:
