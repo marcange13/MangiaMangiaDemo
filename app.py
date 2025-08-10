@@ -1,338 +1,256 @@
-# 🍝 Mangia Mangia – Full Streamlit App (Phase 5)
-# Save this file as: app.py
-# Run locally: pip install streamlit pandas numpy
-#              streamlit run app.py
-
-import streamlit as st
+import io
 import pandas as pd
-import numpy as np
-import ast
-from datetime import datetime
+import streamlit as st
 
-st.set_page_config(page_title="Mangia Mangia AI", layout="wide")
+from logic import (
+    REQUIRED_COLUMNS,
+    load_menu,
+    clean_menu_df,
+    handle_user_query,
+    tasty_for_top,
+    chat_complete,
+    validate_schema,
+)
+from prompts import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE, CHEF_TONE_REMINDER
 
-# ----------------------------
-# Helpers
-# ----------------------------
-def parse_list_maybe(val):
-    """Safely parse list-like strings from CSV into Python lists."""
-    if isinstance(val, list):
-        return val
-    if pd.isna(val):
-        return []
-    s = str(val).strip()
-    try:
-        # parse JSON-like Python list strings
-        return ast.literal_eval(s) if (s.startswith("[") and s.endswith("]")) else [x.strip() for x in s.split(",")]
-    except Exception:
-        return [x.strip() for x in s.split(",")]
+st.set_page_config(
+    page_title="Mangia Mangia — Cucina Assistant",
+    page_icon="🍝",
+    layout="wide",
+)
 
-def ensure_columns(df, columns_with_defaults):
-    for col, default in columns_with_defaults.items():
-        if col not in df.columns:
-            df[col] = default(df) if callable(default) else default
-    return df
+# ============= Italian trattoria theme =============
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Italiana&family=Crimson+Text:wght@400;600;700&display=swap');
 
-def calc_priority_score(df):
-    return df["urgency_score"].fillna(0)*1.5 + df["surplus_score"].fillna(0)*1.0
+:root{
+  --cream:#f7f1e3;
+  --parchment:#f4e7cd;
+  --parchment-ink:#312a23;
+  --olive:#6a7b4f;
+  --tomato:#b23a2a;
+  --chianti:#7a2d2d;
+  --gold:#c9a227;
+  --card:#fffaf0;
+  --shadow:0 12px 30px rgba(49,42,35,.08);
+}
 
-def viability_fallback(df):
-    pm_pct = df.get("profit_margin", pd.Series(np.nan, index=df.index)) / df.get("price_usd", pd.Series(1.0, index=df.index))
-    pm_pct = pm_pct.fillna(pm_pct.median() if not pm_pct.dropna().empty else 0.4)
-    return (df["urgency_score"].fillna(0)*0.5 + df["surplus_score"].fillna(0)*0.4 + pm_pct*0.1)
+html, body, [data-testid="stAppViewContainer"]{
+  background: radial-gradient(1200px 800px at 10% 10%, var(--parchment), var(--cream)) fixed;
+}
 
-def safe_float(x, default=0.0):
-    try:
-        return float(x)
-    except Exception:
-        return default
+.main .block-container {padding-top: 1.2rem; padding-bottom: 2rem;}
 
-# ----------------------------
-# Sidebar – Data sources & Uploads
-# ----------------------------
-st.sidebar.title("⚙️ Data & Controls")
+h1, h2, h3 {
+  font-family: 'Italiana', serif !important;
+  letter-spacing:.3px;
+  color: var(--parchment-ink);
+}
+p, div, span, label {
+  font-family: 'Crimson Text', serif !important;
+  font-size: 18px;
+  color: var(--parchment-ink);
+}
 
-with st.sidebar.expander("📥 Load / Upload Data", expanded=True):
-    uploaded_menu = st.file_uploader("Upload menu_with_viability.csv", type=["csv"])
-    uploaded_inventory = st.file_uploader("Upload authentic_inventory.csv", type=["csv"])
-    use_sample = st.checkbox("Use local files if uploads are empty", value=True)
+.m-brand {
+  display:flex; align-items:center; gap:.6rem;
+  background: linear-gradient(180deg, #fff9ef, #f8eed8);
+  border: 1px solid rgba(0,0,0,.06);
+  border-radius: 18px;
+  padding: .85rem 1rem;
+  box-shadow: var(--shadow);
+}
+.m-brand .dot {
+  width:14px; height:14px; border-radius:999px; background: var(--tomato);
+  box-shadow: 0 0 0 3px rgba(178,58,42,.18);
+}
 
-# Load menu
-if uploaded_menu is not None:
-    menu_df = pd.read_csv(uploaded_menu)
-elif use_sample:
-    try:
-        menu_df = pd.read_csv("menu_with_viability.csv")
-    except Exception:
-        st.error("menu_with_viability.csv not found. Upload it in the sidebar.")
-        st.stop()
-else:
-    st.error("Please upload menu_with_viability.csv")
+.m-card {
+  border: 1px solid rgba(0,0,0,.08);
+  border-radius: 18px;
+  padding: 1rem 1rem 1rem 1rem;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  margin-bottom:.75rem;
+}
+.m-card h3 { margin: 0 0 .25rem 0; }
+
+.m-pill {
+  display:inline-block;
+  padding:.2rem .6rem;
+  border-radius:999px;
+  font-size: .9rem;
+  background: rgba(106,123,79,.10);
+  border: 1px solid rgba(106,123,79,.25);
+  color: var(--olive);
+  margin-right:.35rem;
+}
+
+.stButton>button {
+  background: linear-gradient(180deg, #fff3e6, #ffe2cc);
+  border: 1px solid #e5c2a6;
+  color:#5a2c24;
+  font-weight:600;
+  border-radius:14px;
+  padding:.55rem 1rem;
+}
+.stButton>button:hover { filter: contrast(1.05); transform: translateY(-1px); }
+
+div.stTabs [data-baseweb="tab-list"] { gap:.5rem; }
+div.stTabs [data-baseweb="tab"] {
+  padding: .5rem .9rem; border-radius: 12px;
+  background: rgba(201,162,39,.08); border:1px solid rgba(201,162,39,.25);
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ============= Sidebar =============
+st.sidebar.title("Mangia Mangia 🍝")
+st.sidebar.caption("Inventory-aware menu suggestions to cut waste & boost margin.")
+
+# Upload OR use default CSV path
+uploaded_file = st.sidebar.file_uploader(
+    "Upload your menu CSV",
+    type=["csv"],
+    help="Must include columns: " + ", ".join(REQUIRED_COLUMNS)
+)
+data_path = st.sidebar.text_input("…or use CSV path", "data/menu_with_viability.csv")
+
+# Template download
+template_buf = io.BytesIO()
+pd.DataFrame(columns=REQUIRED_COLUMNS).to_csv(template_buf, index=False)
+st.sidebar.download_button(
+    label="Download template CSV",
+    data=template_buf.getvalue(),
+    file_name="menu_template.csv",
+    mime="text/csv"
+)
+
+weights = {
+    "priority": st.sidebar.slider("Weight: Priority", 0.0, 1.0, 0.55, 0.05),
+    "margin":   st.sidebar.slider("Weight: Margin",   0.0, 1.0, 0.25, 0.05),
+    "urgency":  st.sidebar.slider("Weight: Urgency",  0.0, 1.0, 0.10, 0.05),
+    "surplus":  st.sidebar.slider("Weight: Surplus",  0.0, 1.0, 0.10, 0.05),
+}
+top_k = st.sidebar.slider("Top K dishes", 1, 10, 5)
+use_llm = st.sidebar.checkbox("Use ChatGPT (if key set)", value=True)
+st.sidebar.divider()
+st.sidebar.write("**Tips**")
+st.sidebar.caption("• Upload your CSV or use the default.\n• Narrow your query (e.g., “chicken pasta”).\n• Tune weights to today’s goals.")
+
+# ============= Header =============
+c1, c2 = st.columns([0.72, 0.28])
+with c1:
+    st.markdown("""
+<div class="m-brand">
+  <div class="dot"></div>
+  <div>
+    <h1 style="margin:0;">Mangia Mangia — Cucina Assistant</h1>
+    <div style="opacity:.8;">Reduce waste • Protect margins • Serve authentic Italian fare.</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+with c2:
+    st.metric("Today’s Goal", "Waste ↓ + Margin ↑", delta="Balanced")
+
+# ============= Data loading =============
+@st.cache_data(show_spinner=False)
+def _load_from_path(path: str) -> pd.DataFrame:
+    return load_menu(path)
+
+df = None
+source_note = ""
+try:
+    if uploaded_file is not None:
+        raw = pd.read_csv(uploaded_file)
+        # Schema check panel
+        missing, extra = validate_schema(raw.columns)
+        with st.expander("CSV schema check (uploaded)", expanded=(len(missing) > 0 or len(extra) > 0)):
+            if not missing and not extra:
+                st.success("Schema OK ✅ All required columns present.")
+            if missing:
+                st.error(f"Missing required columns: {', '.join(missing)}")
+            if extra:
+                st.warning(f"Extra columns (ignored by ranking): {', '.join(extra)}")
+            st.caption("Required columns: " + ", ".join(REQUIRED_COLUMNS))
+
+        df = clean_menu_df(raw)  # raises if missing critical columns
+        source_note = "Using **uploaded** dataset ✅"
+    else:
+        df = _load_from_path(data_path)
+        source_note = f"Using dataset from path: `{data_path}`"
+except Exception as e:
+    st.error(f"Failed to load CSV: {e}")
     st.stop()
 
-# Load inventory
-if uploaded_inventory is not None:
-    inventory_df = pd.read_csv(uploaded_inventory)
-elif use_sample:
-    try:
-        inventory_df = pd.read_csv("authentic_inventory.csv")
-    except Exception:
-        st.warning("authentic_inventory.csv not found. You can still browse recommendations.")
-        inventory_df = pd.DataFrame({"ingredient": []})
+# quick preview
+with st.expander("Sample preview", expanded=False):
+    st.dataframe(df.head(8), use_container_width=True)
+
+# ============= Query + Run =============
+query = st.text_input(
+    "What should we cook today?",
+    placeholder="e.g., ‘broccoli pasta’, ‘vegetarian lunch’, ‘seafood special’"
+)
+st.caption(source_note)
+run = st.button("Generate Suggestions")
+
+if run:
+    ranked = handle_user_query(df, query=query or "", top_k=top_k, weights=weights)
+
+    tab1, tab2, tab3 = st.tabs(["Top Picks", "Recipe Ideas", "Assistant Notes"])
+
+    with tab1:
+        st.subheader("Top Picks (inventory-aware) 🍷🍅")
+        for _, r in ranked.iterrows():
+            st.markdown("<div class='m-card'>", unsafe_allow_html=True)
+            cc1, cc2, cc3, cc4 = st.columns([0.42, 0.16, 0.20, 0.22])
+            with cc1:
+                st.markdown(f"### {r['dish_name']}")
+                st.caption(r.get("ingredients",""))
+            with cc2:
+                st.metric("Margin %", f"{r['profit_margin_pct']:.0f}%")
+            with cc3:
+                st.caption("Scores")
+                st.write(
+                    f"Priority: **{r['priority_score']:.2f}**  \n"
+                    f"Urgency: **{r['urgency_score']:.2f}**  \n"
+                    f"Surplus: **{r['surplus_score']:.2f}**"
+                )
+            with cc4:
+                st.caption("Price / Cost")
+                st.write(f"Price: **${r['price']:.2f}**")
+                st.write(f"Cost: **${r['cost']:.2f}**")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        st.divider()
+        with st.expander("See raw table"):
+            st.dataframe(ranked.reset_index(drop=True), use_container_width=True)
+
+    with tab2:
+        st.subheader("Recipe/Video Ideas (Tasty)")
+        ideas_map = tasty_for_top(ranked, max_items=min(3, len(ranked)))
+        for dish, ideas in ideas_map.items():
+            st.markdown(f"**{dish}**")
+            if not ideas:
+                st.caption("No ideas available.")
+                continue
+            for it in ideas:
+                st.markdown(f"- {it.get('name','(unnamed)')} — {it.get('desc','')}")
+                if it.get("video_url"):
+                    st.markdown(f"[Video]({it['video_url']})")
+            st.write("")
+
+    with tab3:
+        st.subheader("Assistant Notes")
+        if use_llm:
+            user_prompt = USER_PROMPT_TEMPLATE.format(query=query or "chef’s choice")
+            user_prompt += "\n\n" + CHEF_TONE_REMINDER
+            response = chat_complete(SYSTEM_PROMPT, user_prompt)
+            st.write(response)
+        else:
+            st.caption("LLM disabled. Enable in sidebar to generate notes.")
 else:
-    inventory_df = pd.DataFrame({"ingredient": []})
+    st.info("Enter a query (or leave blank) and click **Generate Suggestions** to see top picks.")
 
-# Normalize expected columns
-menu_df = ensure_columns(menu_df, {
-    "dish_name": "",
-    "ingredients": [],
-    "price_usd": lambda df: pd.Series([np.nan]*len(df)),
-    "urgency_score": 0.0,
-    "surplus_score": 0.0,
-    "profit_margin": lambda df: pd.Series([np.nan]*len(df)),
-    "pairings": [],
-    "suggested_wine": "",
-})
-# Parse list columns
-menu_df["ingredients"] = menu_df["ingredients"].apply(parse_list_maybe)
-if "pairings" in menu_df.columns:
-    menu_df["pairings"] = menu_df["pairings"].apply(parse_list_maybe)
-
-# Ensure numeric types
-for c in ["price_usd", "urgency_score", "surplus_score", "profit_margin"]:
-    menu_df[c] = menu_df[c].apply(safe_float)
-
-# Derive priority & viability if missing
-if "priority_score" not in menu_df.columns:
-    menu_df["priority_score"] = calc_priority_score(menu_df)
-if "viability_score" not in menu_df.columns:
-    menu_df["viability_score"] = viability_fallback(menu_df)
-
-# Inventory normalize
-if "ingredient" in inventory_df.columns:
-    inv_col = "ingredient"
-else:
-    for col in ["ingredient_name", "item_name", "name"]:
-        if col in inventory_df.columns:
-            inv_col = col
-            break
-    else:
-        inv_col = None
-
-available_ingredients = set()
-if inv_col is not None:
-    inventory_df[inv_col] = inventory_df[inv_col].astype(str).str.lower()
-    available_ingredients = set(inventory_df[inv_col].tolist())
-
-# ----------------------------
-# App Title
-# ----------------------------
-st.title("👨‍🍳 Mangia Mangia: Daily Special Recommender")
-st.caption("Reduce food waste, optimize inventory, and pick profitable specials with AI.")
-
-# ----------------------------
-# Sidebar – Filters
-# ----------------------------
-st.sidebar.subheader("🔎 Filters")
-n_recs = st.sidebar.slider("Number of top dishes", 1, 20, 10)
-max_price = st.sidebar.number_input(
-    "Max price ($)", min_value=0.0,
-    value=float(np.nanmax(menu_df["price_usd"]) if not np.isnan(menu_df["price_usd"]).all() else 0.0)
-)
-min_viability = st.sidebar.slider(
-    "Min viability score", 0.0, float(max(100.0, np.nanmax(menu_df["viability_score"]) if not np.isnan(menu_df["viability_score"]).all() else 10.0)), 0.0
-)
-show_pairings = st.sidebar.checkbox("Show pairings & wine", value=True)
-
-# Scenario toggles
-st.sidebar.subheader("🧪 Scenarios")
-scenario = st.sidebar.selectbox("Scenario", ["Default", "Low Budget", "Surplus Emergency", "High Urgency Priority"])
-
-def apply_scenario(df, scenario_name):
-    df = df.copy()
-    if scenario_name == "Low Budget":
-        inv = df["price_usd"].replace(0, np.nan)
-        df["scenario_score"] = (df["viability_score"]*0.5 + (1.0 / inv) * 10.0).fillna(df["viability_score"])
-    elif scenario_name == "Surplus Emergency":
-        df["scenario_score"] = df["viability_score"] + df["surplus_score"]*2.0
-    elif scenario_name == "High Urgency Priority":
-        df["scenario_score"] = df["viability_score"] + df["urgency_score"]*1.5
-    else:
-        df["scenario_score"] = df["viability_score"]
-    return df
-
-menu_df = apply_scenario(menu_df, scenario)
-
-# ----------------------------
-# Tabs
-# ----------------------------
-tab_dash, tab_recs, tab_inventory, tab_pair, tab_ideas, tab_chat, tab_admin = st.tabs(
-    ["📊 Dashboard", "🍝 Recommendations", "📦 Inventory Match", "🍷 Pairings", "🧠 New Ideas", "💬 Chatbot", "🛠 Admin/Export"]
-)
-
-# ----------------------------
-# Dashboard
-# ----------------------------
-with tab_dash:
-    st.title("📊 Dashboard")
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.metric("Total Dishes", len(menu_df))
-    with c2:
-        st.metric("Median Price", f"${np.nanmedian(menu_df['price_usd']):.2f}" if not np.isnan(menu_df['price_usd']).all() else "N/A")
-    with c3:
-        st.metric("Avg Viability", f"{np.nanmean(menu_df['viability_score']):.2f}")
-    with c4:
-        st.metric("Inventory Items", len(available_ingredients))
-
-    st.subheader("Top Viability (Scenario-adjusted)")
-    show_df = menu_df.sort_values("scenario_score", ascending=False).head(n_recs)
-    st.dataframe(show_df[["dish_name","price_usd","viability_score","priority_score","urgency_score","surplus_score","scenario_score"]])
-
-    st.subheader("Viability Distribution")
-    st.bar_chart(menu_df["viability_score"])
-
-# ----------------------------
-# Recommendations
-# ----------------------------
-with tab_recs:
-    st.title("🍝 Recommendations")
-    df = menu_df.copy()
-    if max_price > 0:
-        df = df[df["price_usd"] <= max_price]
-    df = df[df["viability_score"] >= min_viability]
-
-    top = df.sort_values("scenario_score", ascending=False).head(n_recs)
-
-    if show_pairings:
-        for _, row in top.iterrows():
-            st.markdown(f"**{row['dish_name']}**")
-            st.write(f"• Viability: {row['viability_score']:.2f}  |  Scenario Score: {row['scenario_score']:.2f}")
-            if not np.isnan(row["price_usd"]): st.write(f"• Price: ${row['price_usd']:.2f}")
-            if row.get("suggested_wine"): st.write(f"• Wine: {row['suggested_wine']}")
-            if isinstance(row.get("pairings"), list) and row["pairings"]:
-                st.write(f"• Pairings: {', '.join(row['pairings'])}")
-            st.divider()
-    else:
-        cols = [c for c in ["dish_name","viability_score","scenario_score","price_usd","suggested_wine"] if c in top.columns]
-        st.dataframe(top[cols])
-
-    st.caption("Scenario logic: Default, Low Budget, Surplus Emergency, High Urgency Priority.")
-
-# ----------------------------
-# Inventory Match
-# ----------------------------
-with tab_inventory:
-    st.title("📦 Inventory Match")
-    if available_ingredients:
-        can_make = []
-        missing = []
-        for ings in menu_df["ingredients"]:
-            ings_lower = [i.lower() for i in ings]
-            ok = all(i in available_ingredients for i in ings_lower)
-            can_make.append(ok)
-            missing.append([i for i in ings_lower if i not in available_ingredients])
-        menu_df["can_make_now"] = can_make
-        menu_df["missing_ingredients"] = missing
-
-        st.subheader("Make Right Now")
-        ready = menu_df[menu_df["can_make_now"]].sort_values("scenario_score", ascending=False).head(n_recs)
-        st.dataframe(ready[["dish_name","price_usd","viability_score","scenario_score"]])
-
-        st.subheader("Closest (Minimal Missing)")
-        almost = menu_df[~menu_df["can_make_now"]].copy()
-        almost["missing_count"] = almost["missing_ingredients"].apply(len)
-        almost = almost.sort_values(["missing_count","scenario_score"], ascending=[True, False]).head(n_recs)
-        st.dataframe(almost[["dish_name","missing_ingredients","price_usd","viability_score","scenario_score"]])
-    else:
-        st.info("No inventory loaded. Upload authentic_inventory.csv on the sidebar to see matches.")
-
-# ----------------------------
-# Pairings (Food + Wine)
-# ----------------------------
-with tab_pair:
-    st.title("🍷 Pairings")
-    st.write("Pairings and wine suggestions imported from Phase 4.2 results (heuristic/NLP-lite).")
-    cols = [c for c in ["dish_name","ingredients","pairings","suggested_wine"] if c in menu_df.columns]
-    st.dataframe(menu_df[cols].head(50))
-
-# ----------------------------
-# New Ideas (Tasty mock)
-# ----------------------------
-with tab_ideas:
-    st.title("🧠 New Dish Ideas (Mock Tasty Integration)")
-    st.caption("Offline mock to simulate Tasty suggestions by seed ingredient.")
-
-    mock_tasty_recipes = {
-        "spaghetti": [
-            "Spaghetti Carbonara by Tasty",
-            "One-Pot Spaghetti w/ Tomato & Basil",
-            "Spaghetti Aglio e Olio"
-        ],
-        "gnocchi": [
-            "Baked Gnocchi Alfredo",
-            "Gnocchi with Pesto & Sun-dried Tomatoes"
-        ],
-        "pizza": [
-            "Stuffed Crust Margherita Pizza",
-            "Neapolitan Pizza w/ Buffalo Mozzarella"
-        ],
-        "risotto": [
-            "Creamy Mushroom Risotto",
-            "Saffron Risotto with Parmesan"
-        ],
-        "lasagna": [
-            "Classic Beef Lasagna",
-            "Spinach Lasagna Roll-ups"
-        ],
-    }
-
-    seed = st.selectbox("Pick a seed ingredient", list(mock_tasty_recipes.keys()))
-    ideas = mock_tasty_recipes.get(seed, ["No recipes found."])
-    st.write("**Suggested recipes:**")
-    for i in ideas:
-        st.write("• " + i)
-
-# ----------------------------
-# Chatbot (FAQ-style)
-# ----------------------------
-with tab_chat:
-    st.title("💬 Assistant")
-    st.caption("Lightweight FAQ logic; can be swapped for OpenAI later.")
-
-    def handle_query(q):
-        ql = q.lower()
-        if "what can i cook" in ql or "suggest" in ql:
-            t = menu_df.sort_values("scenario_score", ascending=False).head(5)["dish_name"].tolist()
-            return "🍽️ Try: " + ", ".join(t)
-        if "viability" in ql:
-            return "📈 Viability combines urgency, surplus, and profit margin."
-        if "waste" in ql:
-            return "♻️ Cook high-urgency & high-surplus items first to cut waste."
-        if "pairing" in ql:
-            return "🍷 Pairings use heuristic matching from Phase 4.2."
-        if "special" in ql or "daily" in ql:
-            t = menu_df.sort_values("scenario_score", ascending=False).head(1)["dish_name"].tolist()
-            return f"⭐ Today's special: {t[0]}" if t else "No special available."
-        return "🤖 Ask about: what to cook, viability, waste reduction, pairing, or specials."
-
-    user_q = st.text_input("Ask the assistant")
-    if user_q:
-        st.success(handle_query(user_q))
-
-# ----------------------------
-# Admin / Export
-# ----------------------------
-with tab_admin:
-    st.title("🛠 Admin / Export")
-    st.write("Download scenario-adjusted recommendations for the day.")
-
-    export_cols = [c for c in ["dish_name","ingredients","price_usd","urgency_score","surplus_score","profit_margin","viability_score","priority_score","scenario_score","suggested_wine","pairings"] if c in menu_df.columns]
-    export_df = menu_df.sort_values("scenario_score", ascending=False)[export_cols].head(50).copy()
-    export_df["generated_at"] = datetime.utcnow().isoformat()
-
-    csv_bytes = export_df.to_csv(index=False).encode("utf-8")
-    st.download_button("⬇️ Download Today's Specials (CSV)", data=csv_bytes, file_name="mangia_mangia_todays_specials.csv", mime="text/csv")
-
-    st.subheader("Raw Data Preview")
-    st.dataframe(menu_df.head(50))
